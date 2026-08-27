@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ══════════════════════════════════════
+  #  多平台 wheel 构建（abi3: 一个平台一个 wheel，兼容 py3.9+）
+  # ══════════════════════════════════════
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: x86_64
+          - os: windows-latest
+            target: aarch64
+          # macOS
+          - os: macos-13          # Intel
+            target: x86_64
+          - os: macos-latest      # Apple Silicon
+            target: aarch64
+          # Linux glibc
+          - os: ubuntu-latest
+            target: x86_64
+          - os: ubuntu-latest
+            target: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: auto
+          sccache: 'true'
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist
+
+  # ══════════════════════════════════════
+  #  sdist（源码包，兜底其他平台）
+  # ══════════════════════════════════════
+  build-sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+  # ══════════════════════════════════════
+  #  发布到 PyPI（Trusted Publishing，无需 token）
+  # ══════════════════════════════════════
+  release:
+    name: Release to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    environment: pypi
+    permissions:
+      id-token: write  # Trusted Publishing (OIDC)
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la artifacts/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: artifacts/
+
+  # ══════════════════════════════════════
+  #  冒烟测试：各平台安装并验证导入
+  # ══════════════════════════════════════
+  smoke-test:
+    name: Smoke test on ${{ matrix.os }}
+    needs: [build-wheels]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: wheels-*
+
+      - name: Install wheel
+        run: pip install --find-links dist evebus --no-deps || pip install --find-links dist pyevebus --no-deps
+
+      - name: Test import & wildcard matching
+        run: |
+          python -c "
+          from evebus import EventEngine
+          import asyncio
+
+          engine = EventEngine()
+          results = []
+
+          @engine.on('data.*.ETHUSDT')
+          async def handler(topic, event):
+              results.append(event)
+
+          async def main():
+              await engine.emit('data.quotes.BINANCE.ETHUSDT', {'price': 3000})
+              await engine.wait_for_complete()
+              assert results == [{'price': 3000}], results
+              print('✅ smoke test passed:', results)
+
+          asyncio.run(main())
+          "

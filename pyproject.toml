@@ -1,0 +1,88 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pyevebus"
+version = "0.2.0"
+description = "High-performance async event engine with Python bindings — wildcard matching, hooks, plugins, and HTTP API"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [
+    { name = "EveBus Contributors" },
+]
+keywords = ["event", "engine", "async", "dispatcher", "wildcard", "hooks", "plugins", "event-bus"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "click>=8.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.5",
+    "maturin>=1.0",
+]
+ws = [
+    "websockets>=12.0",
+]
+
+[project.scripts]
+evebus = "evebus.server_cli:main"
+evebusctl = "evebus.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/pyevebus/pyevebus"
+Documentation = "https://github.com/pyevebus/pyevebus#readme"
+Repository = "https://github.com/pyevebus/pyevebus"
+Changelog = "https://github.com/pyevebus/pyevebus/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/pyevebus/pyevebus/issues"
+
+[tool.maturin]
+features = ["pyo3/extension-module", "pyo3/abi3-py39"]
+python-source = "python"
+module-name = "evebus._ffi"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+
+[dependency-groups]
+dev = [
+    "maturin>=1.15.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+]
