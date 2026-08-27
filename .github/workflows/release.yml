@@ -126,6 +126,8 @@ jobs:
         run: pip install --find-links dist pyevebus
 
       - name: Test import & wildcard matching
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           python -c "
           from evebus import EventEngine
@@ -142,7 +144,7 @@ jobs:
               await engine.emit('data.quotes.BINANCE.ETHUSDT', {'price': 3000})
               await engine.wait_for_complete()
               assert results == [{'price': 3000}], results
-              print('✅ smoke test passed:', results)
+              print('smoke test passed:', results)
 
           asyncio.run(main())
           "
