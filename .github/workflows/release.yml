@@ -24,10 +24,10 @@ jobs:
           - os: windows-latest
             target: x86_64
           # macOS
-          - os: macos-13          # Intel
-            target: x86_64
+          - os: ubuntu-latest     # 交叉编译 Intel (避免稀缺 macos-13 runner)
+            target: x86_64-apple-darwin
           - os: macos-latest      # Apple Silicon
-            target: aarch64
+            target: aarch64-apple-darwin
           # Linux glibc
           - os: ubuntu-latest
             target: x86_64
