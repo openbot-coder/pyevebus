@@ -27,7 +27,7 @@ class TestBasicCommands:
     def test_version(self, runner):
         r = runner.invoke(cli, ["--version"])
         assert r.exit_code == 0
-        assert "0.2.0" in r.output
+        assert "0.3.0" in r.output
 
     def test_sources_help(self, runner):
         r = runner.invoke(cli, ["sources", "--help"])

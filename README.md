@@ -229,6 +229,7 @@ await engine.add_plugin(MetricsPlugin())
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `POST` | `/api/v1/events/emit` | 发射事件 |
+| **`GET`** | **`/api/v1/events/subscribe?pattern=`** | **流式订阅事件（SSE）** ⭐ |
 | `GET` | `/api/v1/sources` | 列出所有源 |
 | `POST` | `/api/v1/sources/timer` | 添加定时器源 |
 | `POST` | `/api/v1/sources/webhook` | 添加 Webhook 源 |
@@ -265,6 +266,75 @@ evebusctl sources add-timer heartbeat --topic system.heartbeat -i 5000
 evebusctl emit "data.quotes.BINANCE.ETHUSDT" -d '{"price": 3000}'
 evebusctl status
 ```
+
+## RPC 流式订阅（SSE）
+
+pyevebus 可作为**远程 RPC 后端**：外部系统通过标准 HTTP/SSE 发射事件和**实时订阅事件流**。
+
+### `evebusctl` 订阅
+
+```bash
+# 终端 1：订阅（长连接，持续打印事件）
+evebusctl subscribe "data.*.ETHUSDT"
+
+# 终端 2：发射事件
+evebusctl emit "data.quotes.BINANCE.ETHUSDT" -d '{"price": 3000}'
+
+# 终端 1 输出:
+# [1787826311] data.quotes.BINANCE.ETHUSDT {"price": 3000}
+```
+
+### Python SDK（RPCClient）
+
+```python
+import asyncio
+from evebus.rpc import RPCClient
+
+async def main():
+    client = RPCClient("http://localhost:8080")
+
+    # 发射事件（单向 RPC）
+    await client.emit("data.quotes.BINANCE.ETHUSDT", {"price": 3000})
+
+    # 流式订阅（SSE 推送）
+    async for event in client.subscribe("data.*.ETHUSDT"):
+        print(event["topic"], event["event"])
+
+asyncio.run(main())
+```
+
+### 任意语言消费（标准 SSE 协议）
+
+```bash
+# curl
+curl -N "http://localhost:8080/api/v1/events/subscribe?pattern=data.*"
+```
+
+```javascript
+// 浏览器 / Node（EventSource 自动重连）
+const es = new EventSource(
+  "http://localhost:8080/api/v1/events/subscribe?pattern=data.*.ETHUSDT"
+);
+es.onmessage = (msg) => console.log(JSON.parse(msg.data));
+```
+
+```go
+// Go
+resp, _ := http.Get("http://localhost:8080/api/v1/events/subscribe?pattern=data.*")
+scanner := bufio.NewScanner(resp.Body)
+for scanner.Scan() {
+    line := scanner.Text()
+    if strings.HasPrefix(line, "data: ") {
+        fmt.Println(line[6:])  // 事件 JSON
+    }
+}
+```
+
+**SSE 特性：**
+- 每个订阅连接独立队列（背压上限 1024），慢消费者不丢事件
+- 连接断开自动注销 handler（`engine.off`），无泄漏
+- 支持通配符 pattern（Rust 路由器匹配）
+- 事件格式：`data: {"topic": "...", "event": ..., "timestamp": 纳秒}`
 
 ## 架构
 

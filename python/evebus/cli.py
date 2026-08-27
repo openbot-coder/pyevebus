@@ -32,7 +32,7 @@ DEFAULT_URL = "http://localhost:8080"
 
 
 @click.group()
-@click.version_option(version="0.2.0", prog_name="evebusctl")
+@click.version_option(version="0.3.0", prog_name="evebusctl")
 def cli():
     """EveBus Control — 异步事件引擎远程管理工具"""
     pass
@@ -130,6 +130,47 @@ def emit(topic, data, url):
         click.echo(f"✅ 事件已发射: {topic}")
     else:
         click.echo(f"⚠️  事件已发射但无 handler 匹配: {topic}")
+
+
+# ══════════════════════════════════════
+#  subscribe — 流式订阅事件 (SSE)
+# ══════════════════════════════════════
+
+@cli.command()
+@click.argument("pattern", default="*")
+@click.option("--url", "-u", default=DEFAULT_URL, help="服务地址")
+@click.option("--no-color", is_flag=True, help="不输出彩色时间戳")
+def subscribe(pattern, url, no_color):
+    """流式订阅事件（SSE 推送）"""
+    import asyncio
+    try:
+        from evebus.rpc import RPCClient
+    except ImportError as e:
+        click.echo(f"❌ 缺少依赖: {e}（需要 httpx）", err=True)
+        sys.exit(1)
+
+    click.echo(f"🔔 订阅中: {pattern or '*'}")
+    click.echo(f"   {url}/api/v1/events/subscribe?pattern={pattern or '*'}")
+    click.echo("   按 Ctrl+C 停止")
+    click.echo()
+
+    client = RPCClient(url)
+
+    async def _run():
+        try:
+            async for event in client.subscribe(pattern or "*", auto_reconnect=True):
+                ts = event.get("timestamp", 0) // 1_000_000_000  # ns → s
+                if no_color:
+                    click.echo(json.dumps(event, ensure_ascii=False, default=str))
+                else:
+                    click.echo(
+                        f"\033[90m[{ts}]\033[0m \033[96m{event.get('topic')}\033[0m "
+                        f"{json.dumps(event.get('event'), ensure_ascii=False, default=str)}"
+                    )
+        except KeyboardInterrupt:
+            click.echo("\n⏹️  已停止订阅")
+
+    asyncio.run(_run())
 
 
 # ══════════════════════════════════════

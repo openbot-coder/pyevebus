@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-08-29
+
+### Added
+
+- **RPC 流式订阅（SSE）** — pyevebus 作为远程 RPC 后端
+  - `GET /api/v1/events/subscribe?pattern=` — Server-Sent Events 长连接推送
+  - 通配符 pattern 订阅（复用 Rust 路由器）
+  - 每连接独立队列（背压上限 1024），慢消费者不丢事件
+  - 连接断开自动注销 handler，无泄漏
+- **RPCClient SDK** — `evebus.rpc.RPCClient`
+  - `emit()` 单向发射事件
+  - `subscribe()` 异步流式订阅（支持自动重连 + 指数退避）
+  - `health()` / `stats()` / `list_sources()` / `list_executors()`
+- **`evebusctl subscribe`** — CLI 流式订阅命令（彩色时间戳输出）
+- **跨语言消费** — 标准 SSE 协议，任意语言可消费（curl / JS EventSource / Go）
+- **示例** — `examples/05_rpc_subscribe.py`
+
+### Changed
+
+- **依赖** — 新增 `httpx`（RPCClient SDK 所需）
+
 ## [0.2.0] — 2026-08-28
 
 ### Added

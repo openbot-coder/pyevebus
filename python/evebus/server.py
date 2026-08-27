@@ -7,9 +7,11 @@ EventEngine HTTP API — 管理接口
 或:   uvicorn evebus.server:app --host 0.0.0.0 --port 8080
 """
 
+import asyncio
 import os
 import sys
 import json
+import time
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
@@ -39,7 +41,7 @@ engine = EventEngine()
 app = FastAPI(
     title="EventEngine API",
     description="异步事件引擎管理接口 — 实时添加 Source/Executor/Plugin",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -107,6 +109,52 @@ async def emit_event_path(topic: str, payload: Dict[str, Any] = Body({})):
     """通过 URL path 发射事件"""
     handled = await engine.emit(topic, payload)
     return EmitResponse(ok=True, topic=topic, handled=handled)
+
+
+# ══════════════════════════════════════
+#  SSE 订阅（RPC 流式推送）
+# ══════════════════════════════════════
+
+@app.get("/api/v1/events/subscribe")
+async def subscribe_events(pattern: str = Query("", description="订阅的通配符 pattern，如 data.*.ETHUSDT")):
+    """
+    流式订阅事件（Server-Sent Events）
+
+    通过 SSE 长连接持续推送匹配 pattern 的事件。任意语言/工具可消费：
+      curl -N "http://host:8080/api/v1/events/subscribe?pattern=data.*"
+
+    每个连接独立 Queue（背压上限 1024），断开自动注销 handler。
+    """
+    from fastapi.responses import StreamingResponse
+
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
+
+    async def _on_event(topic: str, event: Any):
+        await queue.put({
+            "topic": topic,
+            "event": event,
+            "timestamp": time.time_ns(),
+        })
+
+    engine.on(pattern or "*", _on_event)
+
+    async def _event_stream():
+        try:
+            while True:
+                item = await queue.get()
+                yield f"data: {json.dumps(item, ensure_ascii=False, default=str)}\n\n"
+        finally:
+            engine.off(pattern or "*", _on_event)
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ══════════════════════════════════════

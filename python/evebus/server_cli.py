@@ -23,7 +23,7 @@ if _python_dir not in sys.path:
 
 
 @click.group()
-@click.version_option(version="0.2.0", prog_name="evebus")
+@click.version_option(version="0.3.0", prog_name="evebus")
 def server_cli():
     """EveBus — 异步事件引擎服务端"""
     pass
