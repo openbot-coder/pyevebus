@@ -23,11 +23,9 @@ jobs:
           # Windows (x86_64 即可覆盖 ARM 模拟运行；无公共 ARM64 runner)
           - os: windows-latest
             target: x86_64
-          # macOS
-          - os: ubuntu-latest     # 交叉编译 Intel (避免稀缺 macos-13 runner)
-            target: x86_64-apple-darwin
-          - os: macos-latest      # Apple Silicon
-            target: aarch64-apple-darwin
+          # macOS universal2 (一个 wheel 同时支持 Intel + Apple Silicon)
+          - os: macos-latest
+            target: universal2-apple-darwin
           # Linux glibc
           - os: ubuntu-latest
             target: x86_64
