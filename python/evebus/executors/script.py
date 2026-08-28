@@ -25,6 +25,7 @@ import os
 import sys
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -53,6 +54,7 @@ class ScriptExecutor(EventExecutor):
         self._on_stop = None  # #22: 初始化，避免 stop() 先于 start() 抛 AttributeError
         self._reload_task: asyncio.Task = None  # type: ignore
         self._on_start_task: Optional[asyncio.Task] = None  # #23: 跟踪 on_start 任务
+        self._running = False  # reload_loop 运行标记（stop() 复位）
 
     def _load_script(self):
         """加载或重新加载脚本（同步，阻塞事件循环 — #24 文档说明）"""
@@ -61,10 +63,19 @@ class ScriptExecutor(EventExecutor):
 
         script_name = Path(self.script_path).stem
 
-        # 创建唯一模块名
-        module_name = f"evebus_script_{self.name}_{script_name}"
+        # 创建唯一模块名（带时间戳确保每次重载都重新执行，绕过
+        # SourceFileLoader 的 mtime 秒级缓存 — 否则 1 秒内热重载执行旧代码）
+        module_name = f"evebus_script_{self.name}_{script_name}_{int(time.time() * 1000)}"
 
         # 加载模块（#24: exec_module 同步执行顶层代码，会阻塞事件循环）
+        # 修复：清除字节码缓存（__pycache__/*.pyc），否则热重载会执行旧代码
+        try:
+            import importlib._bootstrap_external as _be
+            cache_path = _be.cache_from_source(self.script_path)
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+        except Exception:
+            pass
         spec = importlib.util.spec_from_file_location(
             module_name, self.script_path
         )

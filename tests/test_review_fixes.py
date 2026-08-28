@@ -447,8 +447,9 @@ class TestServerCLIFixes:
         mock_popen.return_value = mock_proc
         # wait 抛 KeyboardInterrupt（SIGTERM 被转成 KeyboardInterrupt）
         mock_proc.wait.side_effect = [KeyboardInterrupt, None]
-        runner = CliRunner()
-        r = runner.invoke(server_cli, ["serve", "--port", "9997"])
+        with patch("signal.signal"):
+            runner = CliRunner()
+            r = runner.invoke(server_cli, ["serve", "--port", "9997"])
         assert mock_proc.terminate.called
 
 

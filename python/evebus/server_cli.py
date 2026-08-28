@@ -88,6 +88,12 @@ def serve(host, port, reload, workers, auth_token, log_level):
     except KeyboardInterrupt:
         pass
     finally:
+        # 恢复默认信号处理器，避免泄漏到进程生命周期
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        except Exception:
+            pass
         click.echo("\n⏹️  正在停止服务...")
         process.terminate()
         try:

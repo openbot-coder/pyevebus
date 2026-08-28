@@ -58,18 +58,22 @@ EveBus 提供两个独立的 CLI 工具，类似 `etcd` / `etcdctl`：
 ### `evebus` — 服务端
 
 ```bash
-# 启动 HTTP API 服务
-evebus serve --port 8080
+# 启动 HTTP API 服务（生产环境务必启用认证）
+EVEBUS_AUTH_TOKEN=my-secret evebus serve --port 8080
 
-# 开发模式（自动重载）
+# 开发模式（自动重载，不能与 --workers 同时使用）
 evebus serve --port 8080 --reload
 
-# 多 Worker
+# 多 Worker（注意：引擎是进程内单例，多 worker 会状态分裂，默认拒绝）
 evebus serve --port 8080 --workers 4
 
 # 直接运行脚本执行器
 evebus run strategy.py -t "data.*" --auto-reload
 ```
+
+> ⚠️ **安全**：`evebus serve` 默认绑定 `0.0.0.0` 且管理 API 无认证。
+> **生产环境必须设置 `EVEBUS_AUTH_TOKEN`**（见下方[安全章节](#-安全)），
+> 否则任何能访问端口的人都能添加执行器 → 远程代码执行。
 
 ### `evebusctl` — 客户端管理工具
 
@@ -340,6 +344,40 @@ for scanner.Scan() {
 - 连接断开自动注销 handler（`engine.off`），无泄漏
 - 支持通配符 pattern（Rust 路由器匹配）
 - 事件格式：`data: {"topic": "...", "event": ..., "timestamp": 纳秒}`
+
+## 🔒 安全
+
+### 认证
+
+管理 API（除 `/api/v1/health` 外）支持 token 认证。设置环境变量后，所有请求必须携带 `X-Auth-Token` 头：
+
+```bash
+EVEBUS_AUTH_TOKEN=my-secret evebus serve --port 8080
+
+# 客户端
+curl -H "X-Auth-Token: my-secret" http://localhost:8080/api/v1/stats
+evebusctl emit "data.test" -d '{"x": 1}'   # 需要配合 --url 且服务端在受信网络
+```
+
+> ⚠️ **为什么不默认开启**：方便本地开发。生产部署（尤其暴露到公网）**必须**设置 `EVEBUS_AUTH_TOKEN`，否则任何人可调用 `/api/v1/executors/script` 加载任意脚本 → **远程代码执行（RCE）**。
+
+### 请求体大小限制
+
+默认限制 1MB，超限返回 413：
+
+```bash
+EVEBUS_MAX_BODY_BYTES=524288 evebus serve   # 限制 512KB
+```
+
+### 多 Worker 限制
+
+引擎是**进程内单例**，多 worker（`--workers > 1` 或 `WEB_CONCURRENCY > 1`）会导致订阅/状态分裂。服务端默认拒绝多 worker 启动；如确需横向扩展，请使用独立进程 + 外部存储方案。
+
+### 其他安全修复（v0.3.1）
+
+- SSE 订阅背压：队列满时丢弃事件（`put_nowait`），不阻塞引擎、不泄漏 handler
+- `cancel()` 后任务回调不再抛 `CancelledError`
+- SIGTERM 优雅关闭，uvicorn 子进程不残留
 
 ## 架构
 

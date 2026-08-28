@@ -40,17 +40,20 @@ pip install pyevebus[ws]    # 带 WebSocket 支持
 ### `evebus serve` — 启动 HTTP API 服务
 
 ```bash
-evebus serve                                  # 默认 0.0.0.0:8080
+evebus serve                                  # 默认 0.0.0.0:8080（⚠️ 无认证）
 evebus serve --port 9000                      # 指定端口
 evebus serve --host 127.0.0.1 --port 9000     # 仅本机访问
-evebus serve --workers 4                      # 多进程
-evebus serve --reload                         # 开发模式（自动重载）
+EVEBUS_AUTH_TOKEN=secret evebus serve         # ⚠️ 生产环境必用：启用 API 认证
+evebus serve --reload                         # 开发模式（自动重载，不能与 --workers 同用）
 ```
+
+> ⚠️ **生产安全**：`--workers > 1` 会导致引擎状态分裂（订阅跨 worker 不可见），
+> 服务端默认拒绝。启用认证后，所有管理请求需带 `X-Auth-Token` 头。
 
 启动后：
 
 - **API 文档**：`http://localhost:8080/docs`（Swagger UI）
-- **健康检查**：`GET http://localhost:8080/api/v1/health`
+- **健康检查**：`GET http://localhost:8080/api/v1/health`（免认证）
 
 ### `evebus run` — 直接运行脚本执行器
 
@@ -403,6 +406,26 @@ evebusctl status
 ```
 
 **解决**：先启动服务端 `evebus serve`，确认 `curl http://localhost:8080/api/v1/health` 返回 `{"status":"ok"}`。
+
+### 401 Unauthorized
+
+服务端启用了认证（`EVEBUS_AUTH_TOKEN`），请求未带 `X-Auth-Token` 头或 token 错误。
+
+**解决**：请求时携带正确的 token：
+
+```bash
+curl -H "X-Auth-Token: my-secret" http://localhost:8080/api/v1/stats
+```
+
+### 413 Request Entity Too Large
+
+请求体超过 `EVEBUS_MAX_BODY_BYTES`（默认 1MB）。
+
+**解决**：减小 payload，或调整服务端环境变量 `EVEBUS_MAX_BODY_BYTES`。
+
+### 服务启动报错 "不支持多 worker"
+
+引擎是进程内单例。**解决**：不要设置 `--workers > 1` 或 `WEB_CONCURRENCY > 1`；如需横向扩展请使用独立进程 + 外部存储。
 
 ### 事件没收到
 
