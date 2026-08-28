@@ -4,9 +4,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/pyevebus.svg)](https://pypi.org/project/pyevebus/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-高性能异步事件引擎 — Rust 核心 + Python API + HTTP 管理接口。
+高性能异步事件引擎 — **Rust 匹配核心** + **Python 异步 API** + **HTTP/SSE 接口**，可作为远程 RPC 后端。
 
-参考 [pyee](https://github.com/jfhbrook/pyee) 风格，扩展通配符匹配、Hook 中间件、Source/Executor/Plugin 实时管理。
+参考 [pyee](https://github.com/jfhbrook/pyee) 风格，扩展通配符匹配、Hook 中间件、Source/Executor/Plugin 实时管理、SSE 流式订阅。
 
 > 📖 **完整使用手册**：[docs/USER_GUIDE.md](docs/USER_GUIDE.md)
 
@@ -79,6 +79,9 @@ evebusctl status
 
 # 发射事件
 evebusctl emit "data.test" -d '{"key": "value"}'
+
+# 流式订阅事件（SSE 推送，长连接）
+evebusctl subscribe "data.*.ETHUSDT"
 
 # 管理事件源
 evebusctl sources list
@@ -341,27 +344,35 @@ for scanner.Scan() {
 ## 架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        EveBus                                   │
-│                                                                 │
-│  ┌──────────┐    ┌──────────────┐    ┌──────────────────────┐   │
-│  │ Sources  │──▶ │  Router      │──▶ │  Executors           │   │
-│  │          │    │  通配符匹配   │    │  ScriptExecutor      │   │
-│  │ Timer    │    │  * ? (Rust)  │    │  Handler (on)        │   │
-│  │ WS       │    │              │    │                      │   │
-│  │ Webhook  │    │  Hooks       │    └──────────────────────┘   │
-│  └──────────┘    └──────────────┘                               │
-│                      ▲                                          │
-│                      │ 实时管理                                  │
-│              ┌───────┴───────┐                                  │
-│              │  HTTP API     │◀── evebusctl (客户端管理)         │
-│              │  FastAPI      │                                  │
-│              └───────────────┘                                  │
-│                                                                 │
-│  ┌─────────────────────────────────────────────┐                │
-│  │  Plugins (metrics/audit/自定义)             │                │
-│  └─────────────────────────────────────────────┘                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                           EveBus                                     │
+│                                                                      │
+│  ┌──────────┐    ┌──────────────┐    ┌──────────────────────┐        │
+│  │ Sources  │──▶ │  Router      │──▶ │  Executors           │        │
+│  │          │    │  通配符匹配   │    │  ScriptExecutor      │        │
+│  │ Timer    │    │  * ? (Rust)  │    │  Handler (on)        │        │
+│  │ WS       │    │              │    │                      │        │
+│  │ Webhook  │    │  Hooks       │    └──────────────────────┘        │
+│  └──────────┘    └──────────────┘                                    │
+│                      ▲                                               │
+│                      │ 实时管理                                       │
+│        ┌─────────────┴─────────────┐                                 │
+│        │  HTTP API + SSE 订阅       │                                │
+│        │  FastAPI                  │                                │
+│        │  /emit  /subscribe(SSE)   │                                │
+│        └───────┬───────────┬───────┘                                │
+│                │           │                                         │
+│    evebusctl   │           │ 任意语言 (curl/JS/Go)                    │
+│    (管理/订阅)  │           │                                         │
+│                ▼           ▼                                         │
+│        ┌──────────────────────────────┐                              │
+│        │  RPCClient SDK (evebus.rpc)  │                              │
+│        └──────────────────────────────┘                              │
+│                                                                      │
+│  ┌─────────────────────────────────────────────┐                     │
+│  │  Plugins (metrics/audit/自定义)             │                     │
+│  └─────────────────────────────────────────────┘                     │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Python API
@@ -389,7 +400,7 @@ for scanner.Scan() {
 uv sync --dev
 uv run maturin develop
 
-# 测试 (233 用例，95% 覆盖率)
+# 测试 (246 用例，95%+ 覆盖率)
 uv run python -m pytest tests/ -v
 
 # 代码检查
