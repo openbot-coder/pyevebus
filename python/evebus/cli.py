@@ -32,7 +32,7 @@ DEFAULT_URL = "http://localhost:8080"
 
 
 @click.group()
-@click.version_option(version="0.3.0", prog_name="evebusctl")
+@click.version_option(version="0.3.1", prog_name="evebusctl")
 def cli():
     """EveBus Control — 异步事件引擎远程管理工具"""
     pass

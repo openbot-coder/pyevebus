@@ -63,7 +63,7 @@ engine = EventEngine()
 app = FastAPI(
     title="EventEngine API",
     description="异步事件引擎管理接口 — 实时添加 Source/Executor/Plugin",
-    version="0.3.0",
+    version="0.3.1",
 )
 
 

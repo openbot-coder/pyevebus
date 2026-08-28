@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed (AI 代码审查 — 40 条发现)
+## [0.3.1] — 2026-08-29
 
-**安全（Critical/High）**
+### Security (AI 代码审查 — 40 条发现)
+
+**Critical — 未授权 RCE 修复**
 - **C1** `server.py`: 管理 API 增加认证 — `EVEBUS_AUTH_TOKEN` 环境变量，所有 `/api/v1/*` 端点要求 `X-Auth-Token`（健康检查免认证）
 - **H1** `server.py`: SSE 订阅背压 — `put_nowait` 队列满时丢弃事件，不再无限阻塞/泄漏 handler
 - **H2** `engine.py`: `cancel()` 后 done-callback 抛 CancelledError — 先判 `task.cancelled()`
@@ -28,14 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sources/base.py`: `_detach()` 取消后台任务；`run()` 附加 done-callback 上报异常；`stop()` 只捕获取消
 - `sources/websocket.py`: `max_reconnect=0` 至少尝试一次；消息处理异常不触发重连
 - `executors/base.py`: `_safe_execute` 错误事件发射失败不递归
-- `executors/script.py`: `on_start` 任务跟踪；`start()` 防重入；`stop()` 复位 `_running`
+- `executors/script.py`: `on_start` 任务跟踪；`start()` 防重入；`stop()` 复位 `_running`；热重载清除字节码缓存
 - `rpc/client.py`: JSONDecodeError 跳过坏帧；重连计数在正常流结束时也累计
+- `server_cli.py`: serve 结束后恢复默认信号处理器，不泄漏
 
 **质量（Low）**
 - `hooks.py`: `@hook(stage)` 装饰器元数据被 `add_hook` 消费（stage 可省略）
 - `cli.py`: 无效 JSON 友好报错；API 调用失败返回非零退出码
 - `src/engine.rs`: `subscribe` 去重，避免重复分发
 - `src/matching.rs`: 修正复杂度注释（DP O(n·m)）
+- **Test Suite**: 386 测试，95% 分支覆盖率
 
 ## [0.3.0] — 2026-08-29
 

@@ -23,7 +23,7 @@ from .sources import EventSource, TimerSource, WebSocketSource, WebhookSource
 from .executors import EventExecutor, ScriptExecutor
 from .cli import cli as cli_main
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "EventEngine",
