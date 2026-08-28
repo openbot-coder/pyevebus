@@ -8,6 +8,8 @@
 
 参考 [pyee](https://github.com/jfhbrook/pyee) 风格，扩展通配符匹配、Hook 中间件、Source/Executor/Plugin 实时管理。
 
+> 📖 **完整使用手册**：[docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+
 ## 安装
 
 ```bash
