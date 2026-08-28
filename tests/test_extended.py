@@ -134,7 +134,29 @@ class TestHookDecorator:
         def my_hook(ctx):
             pass
         assert my_hook._hook_stage == HookStage.PRE_EMIT
-        assert my_hook._hook_name == "my_hook"
+        # #14: _hook_name 已移除（无消费方），stage 元数据被 add_hook 消费
+        assert not hasattr(my_hook, "_hook_name")
+
+    def test_hook_decorator_consumed_by_engine(self):
+        """#14: add_hook 从装饰器读取 stage"""
+        engine = EventEngine()
+
+        @hook(HookStage.PRE_EMIT)
+        def my_hook(ctx):
+            return HookResult.CONTINUE
+
+        engine.add_hook(None, my_hook)  # stage 从装饰器读取
+        assert "pre_emit" in engine._hooks
+        assert my_hook in engine._hooks["pre_emit"]
+
+        engine.remove_hook(None, my_hook)
+        assert my_hook not in engine._hooks["pre_emit"]
+
+    def test_hook_decorator_missing_stage(self):
+        """#14: 无 stage 参数且无装饰器元数据时抛错"""
+        engine = EventEngine()
+        with pytest.raises(ValueError, match="stage"):
+            engine.add_hook(None, lambda ctx: None)
 
 
 # ═══════════════════════════════════════

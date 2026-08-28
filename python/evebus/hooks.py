@@ -50,15 +50,17 @@ class HookContext:
 
 def hook(stage: HookStage):
     """
-    装饰器 — 注册 hook
+    装饰器 — 标记 hook 及其阶段
 
     用法:
         @hook(HookStage.PRE_EMIT)
         async def validate_hook(ctx: HookContext):
             return HookResult.CONTINUE
+
+    标记的属性会被 EventEngine.add_hook 消费：当 add_hook 未显式指定
+    stage 时，从装饰器元数据读取。
     """
     def decorator(fn):
         fn._hook_stage = stage
-        fn._hook_name = fn.__name__
         return fn
     return decorator

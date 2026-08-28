@@ -18,7 +18,10 @@ WebSocketSource — WebSocket 事件源
 
 import asyncio
 import json
+import logging
 from .base import EventSource
+
+logger = logging.getLogger("evebus.sources")
 
 
 class WebSocketSource(EventSource):
@@ -53,23 +56,37 @@ class WebSocketSource(EventSource):
                 "需要安装 websockets: pip install websockets"
             )
 
-        while self._running and self._reconnect_count < self.max_reconnect:
+        # #10: 至少尝试连接一次（max_reconnect=0 表示"只连一次不重连"）
+        attempts = 0
+        while self._running and (attempts == 0 or self._reconnect_count < self.max_reconnect):
+            attempts += 1
             try:
                 async with websockets.connect(self.url) as ws:
-                    self._reconnect_count = 0  # 连接成功重置计数
+                    self._reconnect_count = 0  # 连接成功
                     async for message in ws:
                         if not self._running:
                             break
-                        await self._handle_message(message)
+                        # #11: 消息处理异常不视为连接断开，记录日志继续
+                        try:
+                            await self._handle_message(message)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            logger.error(
+                                "[%s] 消息处理失败: %s", self.name, e
+                            )
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
                 if not self._running:
                     break
                 self._reconnect_count += 1
-                print(
-                    f"[{self.name}] 连接断开: {e}, "
-                    f"重连 {self._reconnect_count}/{self.max_reconnect}"
+                logger.warning(
+                    "[%s] 连接断开: %s, 重连 %d/%d",
+                    self.name, e, self._reconnect_count, self.max_reconnect,
                 )
-                await asyncio.sleep(self.reconnect_interval_ms / 1000.0)
+                if self._reconnect_count < self.max_reconnect:
+                    await asyncio.sleep(self.reconnect_interval_ms / 1000.0)
 
     async def _handle_message(self, raw: str):
         """处理 WebSocket 消息"""

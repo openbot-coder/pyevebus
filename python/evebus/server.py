@@ -8,16 +8,18 @@ EventEngine HTTP API — 管理接口
 """
 
 import asyncio
+import hmac
 import os
 import sys
 import json
 import time
+import logging
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 try:
-    from fastapi import FastAPI, HTTPException, Body, Query
-    from fastapi.responses import JSONResponse
+    from fastapi import FastAPI, HTTPException, Body, Query, Request
+    from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import BaseModel, Field
 except ImportError:
     raise ImportError(
@@ -32,6 +34,26 @@ from evebus.sources import TimerSource, WebhookSource
 from evebus.executors import ScriptExecutor
 from evebus.plugin import Plugin
 
+logger = logging.getLogger("evebus.server")
+
+# ══════════════════════════════════════
+#  配置（环境变量）
+# ══════════════════════════════════════
+
+# #30: 认证 token — 设置 EVEBUS_AUTH_TOKEN 后，所有管理端点需要 X-Auth-Token
+AUTH_TOKEN = os.environ.get("EVEBUS_AUTH_TOKEN", "")
+# #31: 请求体大小上限（字节），默认 1MB
+MAX_BODY_BYTES = int(os.environ.get("EVEBUS_MAX_BODY_BYTES", str(1024 * 1024)))
+# #33: 多 worker 下引擎状态分裂 — 显式拒绝
+if os.environ.get("EVEBUS_ALLOW_MULTI_WORKER", "0") == "0":
+    _worker_env = os.environ.get("WEB_CONCURRENCY", "")
+    if _worker_env not in ("", "1"):
+        raise RuntimeError(
+            "EVEBUS 引擎是进程内单例：不支持多 worker（WEB_CONCURRENCY>1 会导致状态分裂）。"
+            "如需横向扩展，请使用独立进程 + 外部存储。"
+        )
+
+
 # ══════════════════════════════════════
 #  创建 Engine 和 App
 # ══════════════════════════════════════
@@ -43,6 +65,41 @@ app = FastAPI(
     description="异步事件引擎管理接口 — 实时添加 Source/Executor/Plugin",
     version="0.3.0",
 )
+
+
+# ══════════════════════════════════════
+#  认证中间件（#30）— 保护所有 /api/v1 端点
+# ══════════════════════════════════════
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if AUTH_TOKEN:
+        path = request.url.path
+        # 健康检查无需认证
+        if path == "/api/v1/health":
+            return await call_next(request)
+        token = request.headers.get("X-Auth-Token", "")
+        if not hmac.compare_digest(token, AUTH_TOKEN):
+            return JSONResponse(
+                {"ok": False, "error": "unauthorized"},
+                status_code=401,
+            )
+    return await call_next(request)
+
+
+# ══════════════════════════════════════
+#  请求体大小限制中间件（#31）
+# ══════════════════════════════════════
+
+@app.middleware("http")
+async def body_size_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length and content_length.isdigit() and int(content_length) > MAX_BODY_BYTES:
+        return JSONResponse(
+            {"ok": False, "error": f"body too large (max {MAX_BODY_BYTES} bytes)"},
+            status_code=413,
+        )
+    return await call_next(request)
 
 
 # ══════════════════════════════════════
@@ -105,9 +162,12 @@ async def emit_event(req: EmitRequest):
 
 
 @app.post("/api/v1/events/emit/{topic:path}")
-async def emit_event_path(topic: str, payload: Dict[str, Any] = Body({})):
+async def emit_event_path(
+    topic: str,
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+):
     """通过 URL path 发射事件"""
-    handled = await engine.emit(topic, payload)
+    handled = await engine.emit(topic, payload or {})
     return EmitResponse(ok=True, topic=topic, handled=handled)
 
 
@@ -130,11 +190,15 @@ async def subscribe_events(pattern: str = Query("", description="订阅的通配
     queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
 
     async def _on_event(topic: str, event: Any):
-        await queue.put({
-            "topic": topic,
-            "event": event,
-            "timestamp": time.time_ns(),
-        })
+        # #32: 队列满时用 put_nowait 丢弃（慢消费者不阻塞引擎），避免 handler 泄漏
+        try:
+            queue.put_nowait({
+                "topic": topic,
+                "event": event,
+                "timestamp": time.time_ns(),
+            })
+        except asyncio.QueueFull:
+            logger.warning("SSE subscriber queue full, dropping event: %s", topic)
 
     engine.on(pattern or "*", _on_event)
 

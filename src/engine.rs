@@ -24,14 +24,19 @@ impl PyRouter {
         }
     }
 
-    /// 注册 handler
+    /// 注册 handler（#28: 去重，避免同一 handler 重复分发）
     fn subscribe(&mut self, pattern: &str, handler_id: &str) {
-        self.handlers
+        let list = self
+            .handlers
             .entry(pattern.to_string())
-            .or_insert_with(Vec::new)
-            .push(handler_id.to_string());
+            .or_insert_with(Vec::new);
+        // #28: 重复订阅同一 (pattern, handler_id) 时跳过
+        if !list.iter().any(|h| h == handler_id) {
+            list.push(handler_id.to_string());
+        }
 
-        if !self.patterns.contains(&pattern.to_string()) {
+        // #29: patterns 用 contains 检查（此处 list 已存在即 pattern 已注册）
+        if !self.patterns.iter().any(|p| p == pattern) {
             self.patterns.push(pattern.to_string());
         }
     }

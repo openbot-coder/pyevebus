@@ -10,7 +10,10 @@ EventEngine — 异步事件引擎核心
 
 import asyncio
 import functools
+import logging
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+
+logger = logging.getLogger("evebus")
 
 try:
     from ._ffi import PyRouter
@@ -99,7 +102,14 @@ class EventEngine:
     def off(self, pattern: str, handler: Optional[Callable] = None):
         """移除 handler"""
         if handler is None:
-            self._handlers.pop(pattern, None)
+            removed = self._handlers.pop(pattern, None)
+            if removed:
+                # #37: 逐个按注册 id 从 router 卸载
+                for h in removed:
+                    try:
+                        self._router.unsubscribe(pattern, str(id(h)))
+                    except Exception:
+                        pass
             return
         self._remove_handler(pattern, handler)
 
@@ -168,8 +178,9 @@ class EventEngine:
 
     async def wait_for_complete(self):
         """等待所有 pending 协程完成"""
-        if self._waiting:
-            await asyncio.gather(*self._waiting, return_exceptions=True)
+        # #39: 循环等待当前快照，处理并发 emit 期间新增的 task
+        while self._waiting:
+            await asyncio.gather(*list(self._waiting), return_exceptions=True)
 
     def cancel(self):
         """取消所有 pending"""
@@ -192,8 +203,13 @@ class EventEngine:
             return {"ok": False, "error": f"Source '{source.name}' already exists"}
         source._attach(self)
         self._sources[source.name] = source
-        # 启动 source
-        await source.run()
+        # 启动 source（#36: 失败时回滚，保持与 add_executor 一致）
+        try:
+            await source.run()
+        except Exception as e:
+            self._sources.pop(source.name, None)
+            source._detach()
+            return {"ok": False, "error": str(e)}
         return {"ok": True, "source": source.info()}
 
     async def remove_source(self, name: str) -> dict:
@@ -305,10 +321,21 @@ class EventEngine:
     #  Hook 系统
     # ══════════════════════════════════════════════
 
-    def add_hook(self, stage: HookStage, hook: Callable):
+    def add_hook(self, stage: Optional[HookStage], hook: Callable):
+        # #14: 支持 @hook(stage) 装饰器 — 未显式传 stage 时从元数据读取
+        if stage is None:
+            stage = getattr(hook, "_hook_stage", None)
+            if stage is None:
+                raise ValueError(
+                    "add_hook 需要 stage 参数，或 hook 使用 @hook(HookStage.X) 装饰"
+                )
         self._hooks.setdefault(stage.value, []).append(hook)
 
-    def remove_hook(self, stage: HookStage, hook: Callable):
+    def remove_hook(self, stage: Optional[HookStage], hook: Callable):
+        if stage is None:
+            stage = getattr(hook, "_hook_stage", None)
+        if stage is None:
+            raise ValueError("remove_hook 需要 stage 参数，或 hook 使用 @hook(HookStage.X) 装饰")
         hooks = self._hooks.get(stage.value, [])
         self._hooks[stage.value] = [h for h in hooks if h != hook]
 
@@ -362,18 +389,30 @@ class EventEngine:
 
     def _remove_handler(self, pattern, handler):
         if pattern in self._handlers:
-            self._handlers[pattern] = [
-                h for h in self._handlers[pattern]
-                if h != handler and getattr(h, "_original", None) != handler
-            ]
-            if not self._handlers[pattern]:
+            kept = []
+            for h in self._handlers[pattern]:
+                if h == handler or getattr(h, "_original", None) == handler:
+                    # #37: 被移除的 handler 按注册 id 从 router 卸载
+                    try:
+                        self._router.unsubscribe(pattern, str(id(h)))
+                    except Exception:
+                        pass
+                else:
+                    kept.append(h)
+            if kept:
+                self._handlers[pattern] = kept
+            else:
                 del self._handlers[pattern]
 
     def _on_task_done(self, task: asyncio.Task):
         self._waiting.discard(task)
+        # #35: 已取消的任务 exception() 会抛 CancelledError，需先判 cancelled
+        if task.cancelled():
+            return
         exc = task.exception()
         if exc:
-            loop = asyncio.get_event_loop()
+            # #40: 回调总是运行在事件循环内，用 get_running_loop
+            loop = asyncio.get_running_loop()
             loop.call_soon(
                 lambda: asyncio.ensure_future(self.emit("error", {"error": str(exc)}))
             )
@@ -386,8 +425,10 @@ class EventEngine:
                     result = await result
                 if result is not None and result != HookResult.CONTINUE:
                     return result
-            except Exception:
-                pass
+            except Exception as e:
+                # #38: 记录 hook 异常，不再静默吞掉
+                logger.warning("Hook %s failed at stage %s: %s",
+                               getattr(hook_fn, "__name__", hook_fn), stage, e)
         return HookResult.CONTINUE
 
     def _wrap_once(self, pattern, handler):

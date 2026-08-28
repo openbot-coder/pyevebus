@@ -8,6 +8,7 @@ EveBus Server CLI — 服务端启动工具
 
 import sys
 import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -38,13 +39,20 @@ def server_cli():
 @click.option("--port", "-p", default=8080, type=int, help="监听端口")
 @click.option("--reload", is_flag=True, help="开发模式（自动重载）")
 @click.option("--workers", "-w", default=1, type=int, help="工作进程数")
+@click.option("--auth-token", default=None, help="API 认证 token（保护管理端点）")
 @click.option("--log-level", default="info", type=click.Choice(["debug", "info", "warning", "error"]))
-def serve(host, port, reload, workers, log_level):
+def serve(host, port, reload, workers, auth_token, log_level):
     """启动 HTTP API 服务"""
+    # #16: --reload 和 --workers 互斥（uvicorn 不支持同时使用）
+    if reload and workers > 1:
+        raise click.UsageError("--reload 与 --workers 不能同时使用（开发模式 vs 多进程模式）")
+
     click.echo(f"🚀 启动 EveBus 服务...")
     click.echo(f"   地址: http://{host}:{port}")
     click.echo(f"   文档: http://{host}:{port}/docs")
     click.echo(f"   日志: {log_level}")
+    if auth_token:
+        click.echo(f"   认证: 已启用（X-Auth-Token）")
     click.echo()
 
     # 构建 uvicorn 命令
@@ -61,12 +69,21 @@ def serve(host, port, reload, workers, log_level):
     if workers > 1:
         cmd.append(f"--workers={workers}")
 
-    # 设置环境变量
+    # 设置环境变量（#30: 认证 token 通过环境变量传给子进程）
     env = os.environ.copy()
     env["PYTHONPATH"] = _python_dir + ":" + env.get("PYTHONPATH", "")
+    if auth_token:
+        env["EVEBUS_AUTH_TOKEN"] = auth_token
 
     process = subprocess.Popen(cmd, env=env)
+
+    # #15: 同时处理 SIGINT 和 SIGTERM，确保子进程被清理
+    def _shutdown(sig, frame):
+        raise KeyboardInterrupt()
+
     try:
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
         process.wait()
     except KeyboardInterrupt:
         pass
@@ -87,7 +104,7 @@ def serve(host, port, reload, workers, log_level):
 
 @server_cli.command()
 @click.argument("script")
-@click.option("--patterns", "-t", multiple=True, default=["*"], help="订阅的 patterns")
+@click.option("--patterns", "-t", multiple=True, default=("*",), help="订阅的 patterns（可多次指定）")
 @click.option("--auto-reload", is_flag=True, help="自动重载脚本")
 @click.option("--reload-interval", default=30.0, type=float, help="重载检查间隔(秒)")
 @click.option("--name", "-n", default=None, help="执行器名称")
@@ -115,19 +132,23 @@ def run(script, patterns, auto_reload, reload_interval, name):
             auto_reload=auto_reload,
             reload_interval_sec=reload_interval,
         )
-        await engine.add_executor(executor)
-        click.echo(f"✅ 执行器已启动: {executor.name}")
-        click.echo("   按 Ctrl+C 停止")
-        click.echo()
-
-        # 保持运行
+        # #17: 保证异常路径也执行 remove_executor 清理
         try:
+            await engine.add_executor(executor)
+            click.echo(f"✅ 执行器已启动: {executor.name}")
+            click.echo("   按 Ctrl+C 停止")
+            click.echo()
+            # 保持运行
             while True:
                 await asyncio.sleep(1)
         except (KeyboardInterrupt, asyncio.CancelledError):
             click.echo("\n⏹️  停止执行器...")
-            await engine.remove_executor(executor.name)
-            click.echo("✅ 已停止")
+        finally:
+            try:
+                await engine.remove_executor(executor.name)
+                click.echo("✅ 已停止")
+            except Exception:
+                pass
 
     asyncio.run(_run())
 

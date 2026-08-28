@@ -190,7 +190,8 @@ def sources(ctx, url):
 @click.pass_context
 def sources_list(ctx):
     """列出所有事件源"""
-    _api_get(ctx.obj["url"], "/api/v1/sources", "📡 事件源")
+    if not _api_get(ctx.obj["url"], "/api/v1/sources", "📡 事件源"):
+        sys.exit(1)
 
 
 @sources.command("add-timer")
@@ -201,13 +202,19 @@ def sources_list(ctx):
 @click.pass_context
 def sources_add_timer(ctx, name, topic, interval, data):
     """添加定时器事件源"""
-    payload = json.loads(data) if data else {}
-    _api_post(ctx.obj["url"], "/api/v1/sources/timer", {
+    # #12: 无效 JSON 给出友好错误而非裸 traceback
+    try:
+        payload = json.loads(data) if data else {}
+    except json.JSONDecodeError as e:
+        click.echo(f"❌ 无效的 JSON: {e}", err=True)
+        sys.exit(1)
+    if not _api_post(ctx.obj["url"], "/api/v1/sources/timer", {
         "name": name,
         "topic": topic,
         "interval_ms": interval,
         "payload": payload,
-    })
+    }):
+        sys.exit(1)
 
 
 @sources.command("add-webhook")
@@ -217,11 +224,12 @@ def sources_add_timer(ctx, name, topic, interval, data):
 @click.pass_context
 def sources_add_webhook(ctx, name, path, prefix):
     """添加 Webhook 事件源"""
-    _api_post(ctx.obj["url"], "/api/v1/sources/webhook", {
+    if not _api_post(ctx.obj["url"], "/api/v1/sources/webhook", {
         "name": name,
         "path": path,
         "topic_prefix": prefix,
-    })
+    }):
+        sys.exit(1)
 
 
 @sources.command("start")
@@ -229,7 +237,8 @@ def sources_add_webhook(ctx, name, path, prefix):
 @click.pass_context
 def sources_start(ctx, name):
     """启动事件源"""
-    _api_post(ctx.obj["url"], f"/api/v1/sources/{name}/start")
+    if not _api_post(ctx.obj["url"], f"/api/v1/sources/{name}/start"):
+        sys.exit(1)
 
 
 @sources.command("stop")
@@ -237,7 +246,8 @@ def sources_start(ctx, name):
 @click.pass_context
 def sources_stop(ctx, name):
     """停止事件源"""
-    _api_post(ctx.obj["url"], f"/api/v1/sources/{name}/stop")
+    if not _api_post(ctx.obj["url"], f"/api/v1/sources/{name}/stop"):
+        sys.exit(1)
 
 
 @sources.command("remove")
@@ -245,7 +255,8 @@ def sources_stop(ctx, name):
 @click.pass_context
 def sources_remove(ctx, name):
     """移除事件源"""
-    _api_delete(ctx.obj["url"], f"/api/v1/sources/{name}")
+    if not _api_delete(ctx.obj["url"], f"/api/v1/sources/{name}"):
+        sys.exit(1)
 
 
 # ══════════════════════════════════════
@@ -265,7 +276,8 @@ def executors(ctx, url):
 @click.pass_context
 def executors_list(ctx):
     """列出所有执行器"""
-    _api_get(ctx.obj["url"], "/api/v1/executors", "⚙️  执行器")
+    if not _api_get(ctx.obj["url"], "/api/v1/executors", "⚙️  执行器"):
+        sys.exit(1)
 
 
 @executors.command("add")
@@ -281,12 +293,13 @@ def executors_add(ctx, name, script, patterns, auto_reload):
         click.echo(f"❌ 脚本不存在: {script_path}", err=True)
         sys.exit(1)
 
-    _api_post(ctx.obj["url"], "/api/v1/executors/script", {
+    if not _api_post(ctx.obj["url"], "/api/v1/executors/script", {
         "name": name,
         "script_path": script_path,
         "patterns": list(patterns),
         "auto_reload": auto_reload,
-    })
+    }):
+        sys.exit(1)
 
 
 @executors.command("reload")
@@ -294,7 +307,8 @@ def executors_add(ctx, name, script, patterns, auto_reload):
 @click.pass_context
 def executors_reload(ctx, name):
     """重载执行器脚本"""
-    _api_post(ctx.obj["url"], f"/api/v1/executors/{name}/reload")
+    if not _api_post(ctx.obj["url"], f"/api/v1/executors/{name}/reload"):
+        sys.exit(1)
 
 
 @executors.command("remove")
@@ -302,7 +316,8 @@ def executors_reload(ctx, name):
 @click.pass_context
 def executors_remove(ctx, name):
     """移除执行器"""
-    _api_delete(ctx.obj["url"], f"/api/v1/executors/{name}")
+    if not _api_delete(ctx.obj["url"], f"/api/v1/executors/{name}"):
+        sys.exit(1)
 
 
 # ══════════════════════════════════════
@@ -322,7 +337,8 @@ def plugins(ctx, url):
 @click.pass_context
 def plugins_list(ctx):
     """列出所有插件"""
-    _api_get(ctx.obj["url"], "/api/v1/plugins", "🔌 插件")
+    if not _api_get(ctx.obj["url"], "/api/v1/plugins", "🔌 插件"):
+        sys.exit(1)
 
 
 @plugins.command("remove")
@@ -330,7 +346,8 @@ def plugins_list(ctx):
 @click.pass_context
 def plugins_remove(ctx, name):
     """移除插件"""
-    _api_delete(ctx.obj["url"], f"/api/v1/plugins/{name}")
+    if not _api_delete(ctx.obj["url"], f"/api/v1/plugins/{name}"):
+        sys.exit(1)
 
 
 # ══════════════════════════════════════
@@ -338,17 +355,21 @@ def plugins_remove(ctx, name):
 # ══════════════════════════════════════
 
 def _api_get(url, path, title):
+    # #13: 失败返回 False，调用方可据此非零退出
     import urllib.request
     try:
         req = urllib.request.urlopen(f"{url}{path}")
         data = json.loads(req.read())
         click.echo(f"{title}:")
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        return True
     except Exception as e:
         click.echo(f"❌ 请求失败: {e}", err=True)
+        return False
 
 
 def _api_post(url, path, payload=None):
+    # #13: 失败返回 False
     import urllib.request
     try:
         req_data = json.dumps(payload or {}).encode()
@@ -360,19 +381,24 @@ def _api_post(url, path, payload=None):
         resp = urllib.request.urlopen(req)
         data = json.loads(resp.read())
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        return True
     except Exception as e:
         click.echo(f"❌ 请求失败: {e}", err=True)
+        return False
 
 
 def _api_delete(url, path):
+    # #13: 失败返回 False
     import urllib.request
     try:
         req = urllib.request.Request(f"{url}{path}", method="DELETE")
         resp = urllib.request.urlopen(req)
         data = json.loads(resp.read())
         click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+        return True
     except Exception as e:
         click.echo(f"❌ 请求失败: {e}", err=True)
+        return False
 
 
 def main():

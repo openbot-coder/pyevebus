@@ -4,8 +4,10 @@
 /// - `*` 匹配任意数量的字符（包括零个）
 /// - `?` 恰好匹配一个字符
 ///
-/// 贪婪双指针算法，O(n+m) 常见，O(n*m) 最坏。
-/// 参考 NautilusTrader 的 `is_matching_backtracking`。
+/// 动态规划实现，时间复杂度 O(n*m)，空间复杂度 O(m)（滚动数组）。
+/// 注意：`find_matches` 会对每个 pattern 调用 `is_match`，因此总复杂度为
+/// O(patterns * n * m)。若 pattern 集很大，可考虑贪心回溯算法以降低
+/// 常见情况复杂度，但当前 DP 实现行为确定且易于验证。
 
 /// 检查 topic 是否匹配 pattern
 ///

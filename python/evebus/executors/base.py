@@ -16,11 +16,13 @@ EventExecutor 基类 — 事件处理端
             print(f"处理: {topic}")
 """
 
-import asyncio
+import logging
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..engine import EventEngine
+
+logger = logging.getLogger("evebus.executors")
 
 
 class EventExecutor:
@@ -50,7 +52,7 @@ class EventExecutor:
             engine._router.subscribe(pattern, f"executor:{self.name}:{id(self)}")
 
     def _detach(self):
-        """内部：从引擎卸载"""
+        """内部：从引擎卸载（#19: 同时从 router 卸载订阅）"""
         if self._engine:
             for pattern in self.patterns:
                 if pattern in self._engine._executor_handlers:
@@ -58,6 +60,12 @@ class EventExecutor:
                         e for e in self._engine._executor_handlers[pattern]
                         if e is not self
                     ]
+                # 从 router 卸载该 executor 的订阅
+                try:
+                    self._engine._router.unsubscribe(
+                        pattern, f"executor:{self.name}:{id(self)}")
+                except Exception:
+                    pass
         self._engine = None
         self._attached = False
 
@@ -80,13 +88,21 @@ class EventExecutor:
             await self.execute(topic, payload)
         except Exception as e:
             self._error_count += 1
-            # 发射错误事件
+            logger.error("Executor '%s' failed on %s: %s", self.name, topic, e)
+            # #20: 发射错误事件（若引擎存在）
             if self._engine:
-                await self._engine.emit("error", {
-                    "executor": self.name,
-                    "topic": topic,
-                    "error": str(e),
-                }, source=f"executor:{self.name}")
+                try:
+                    await self._engine.emit("error", {
+                        "executor": self.name,
+                        "topic": topic,
+                        "error": str(e),
+                    }, source=f"executor:{self.name}")
+                except Exception as emit_err:
+                    # 错误事件自身失败不递归，仅记录
+                    logger.error(
+                        "Executor '%s' error-event emit failed: %s",
+                        self.name, emit_err,
+                    )
 
     def info(self) -> dict:
         return {

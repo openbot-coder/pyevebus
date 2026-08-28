@@ -93,25 +93,29 @@ class RPCClient:
                         params=params,
                     ) as resp:
                         resp.raise_for_status()
-                        reconnect_count = 0  # 连接成功，重置重连计数
                         async for line in resp.aiter_lines():
                             if line.startswith("data: "):
-                                yield json.loads(line[6:])
+                                # #2: JSONDecodeError 不终止订阅，跳过坏帧
+                                try:
+                                    yield json.loads(line[6:])
+                                except json.JSONDecodeError:
+                                    continue
                         # 流正常结束（服务端关闭）
                         if not auto_reconnect:
                             return
+                        # #3: 正常结束也算一次重连周期，避免 max_reconnects 失效
+                        reconnect_count += 1
+                        if reconnect_count > max_reconnects:
+                            raise RPCError(f"重连次数超限 ({max_reconnects})")
+                        await asyncio.sleep(min(2 ** reconnect_count, 30))
             except (httpx.HTTPError, ConnectionError) as e:
                 if not auto_reconnect:
                     raise RPCError(f"订阅失败: {e}") from e
-
-            if not auto_reconnect:
-                return
-
-            reconnect_count += 1
-            if reconnect_count > max_reconnects:
-                raise RPCError(f"重连次数超限 ({max_reconnects})")
-
-            await asyncio.sleep(min(2 ** reconnect_count, 30))  # 指数退避
+                # #1: 此处 auto_reconnect 恒为 True（#3 已处理正常结束路径）
+                reconnect_count += 1
+                if reconnect_count > max_reconnects:
+                    raise RPCError(f"重连次数超限 ({max_reconnects})")
+                await asyncio.sleep(min(2 ** reconnect_count, 30))  # 指数退避
 
     # ══════════════════════════════════════
     #  查询 / 管理（便捷封装）

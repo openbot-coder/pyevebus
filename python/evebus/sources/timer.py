@@ -17,7 +17,10 @@ TimerSource — 定时事件源
 """
 
 import asyncio
+import logging
 from .base import EventSource
+
+logger = logging.getLogger("evebus.sources")
 
 
 class TimerSource(EventSource):
@@ -31,6 +34,9 @@ class TimerSource(EventSource):
         payload: dict = None,
     ):
         super().__init__(name)
+        # #4: interval_ms 必须为正，避免 busy-loop
+        if interval_ms <= 0:
+            raise ValueError(f"interval_ms must be positive, got {interval_ms}")
         self.topic = topic
         self.interval_ms = interval_ms
         self.payload = payload or {}
@@ -45,11 +51,18 @@ class TimerSource(EventSource):
             if not self._running:
                 break
             self._count += 1
-            await self.emit(self.topic, {
-                **self.payload,
-                "tick": self._count,
-                "interval_ms": self.interval_ms,
-            })
+            try:
+                await self.emit(self.topic, {
+                    **self.payload,
+                    "tick": self._count,
+                    "interval_ms": self.interval_ms,
+                })
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # #5: emit 失败记录日志继续循环，不静默终止定时器
+                logger.error("TimerSource '%s' emit failed on tick %d: %s",
+                             self.name, self._count, e)
 
     def info(self) -> dict:
         base = super().info()

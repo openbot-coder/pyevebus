@@ -45,14 +45,16 @@ class TestScriptExecutorReload:
 
     @pytest.mark.asyncio
     async def test_stop_with_reload_task(self):
-        """stop 会取消 reload_task"""
+        """stop 会取消 reload_task（#25: stop 后 task 置 None 且已取消）"""
         path = self._make_script("stop_rl.py", 'async def on_event(t, e): pass\n')
         ex = ScriptExecutor(name="ex1", script_path=path, patterns=["*"], auto_reload=True, reload_interval_sec=0.05)
         engine = EventEngine()
         await engine.add_executor(ex)
         assert ex._reload_task is not None
+        task = ex._reload_task
         await engine.remove_executor("ex1")
-        assert ex._reload_task.cancelled() or ex._reload_task.done()
+        assert ex._reload_task is None
+        assert task.cancelled() or task.done()
         os.remove(path)
 
     @pytest.mark.asyncio

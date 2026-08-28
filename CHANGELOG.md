@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (AI 代码审查 — 40 条发现)
+
+**安全（Critical/High）**
+- **C1** `server.py`: 管理 API 增加认证 — `EVEBUS_AUTH_TOKEN` 环境变量，所有 `/api/v1/*` 端点要求 `X-Auth-Token`（健康检查免认证）
+- **H1** `server.py`: SSE 订阅背压 — `put_nowait` 队列满时丢弃事件，不再无限阻塞/泄漏 handler
+- **H2** `engine.py`: `cancel()` 后 done-callback 抛 CancelledError — 先判 `task.cancelled()`
+- **H3** `server_cli.py`: SIGTERM 处理 — 与 SIGINT 同样触发子进程清理，不再产生孤儿进程
+- **H4** `engine.py`/`executors/base.py`: Router 订阅泄漏 — `off()`/`_remove_handler`/executor `_detach()` 现在按 handler_id 从 router 卸载
+- **H5** `server_cli.py`: `--reload` 与 `--workers` 互斥校验
+- **H6** `executors/script.py`: `_on_stop` 在 `__init__` 初始化，`stop()` 先于 `start()` 不再抛 AttributeError
+
+**健壮性（Medium）**
+- `server.py`: 请求体大小限制（`EVEBUS_MAX_BODY_BYTES`，默认 1MB，超限 413）
+- `server.py`: 拒绝多 worker 启动（引擎是进程内单例，`WEB_CONCURRENCY>1` 抛错）
+- `engine.py`: `add_source` 失败时回滚（与 add_executor 一致）
+- `engine.py`: `wait_for_complete` 循环等待快照，覆盖并发 emit 新增任务
+- `engine.py`: hook 异常记录日志，不再静默吞掉
+- `sources/timer.py`: `interval_ms<=0` 抛 ValueError；emit 失败记录日志继续循环
+- `sources/base.py`: `_detach()` 取消后台任务；`run()` 附加 done-callback 上报异常；`stop()` 只捕获取消
+- `sources/websocket.py`: `max_reconnect=0` 至少尝试一次；消息处理异常不触发重连
+- `executors/base.py`: `_safe_execute` 错误事件发射失败不递归
+- `executors/script.py`: `on_start` 任务跟踪；`start()` 防重入；`stop()` 复位 `_running`
+- `rpc/client.py`: JSONDecodeError 跳过坏帧；重连计数在正常流结束时也累计
+
+**质量（Low）**
+- `hooks.py`: `@hook(stage)` 装饰器元数据被 `add_hook` 消费（stage 可省略）
+- `cli.py`: 无效 JSON 友好报错；API 调用失败返回非零退出码
+- `src/engine.rs`: `subscribe` 去重，避免重复分发
+- `src/matching.rs`: 修正复杂度注释（DP O(n·m)）
+
 ## [0.3.0] — 2026-08-29
 
 ### Added
